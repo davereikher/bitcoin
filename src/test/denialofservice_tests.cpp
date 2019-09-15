@@ -4,10 +4,12 @@
 
 // Unit tests for denial-of-service detection/prevention code
 
+#include <arith_uint256.h>
 #include <banman.h>
 #include <chainparams.h>
 #include <net.h>
 #include <net_processing.h>
+#include <pubkey.h>
 #include <script/sign.h>
 #include <script/signingprovider.h>
 #include <script/standard.h>
@@ -356,14 +358,40 @@ BOOST_AUTO_TEST_CASE(DoS_bantime)
     peerLogic->FinalizeNode(dummyNode.GetId(), dummy);
 }
 
-static CTransactionRef RandomOrphan()
+static CTransactionRef OrphanByIndex(const uint256& orphan_index)
 {
     std::map<uint256, COrphanTx>::iterator it;
     LOCK2(cs_main, g_cs_orphans);
-    it = mapOrphanTransactions.lower_bound(InsecureRand256());
+    it = mapOrphanTransactions.lower_bound(orphan_index);
     if (it == mapOrphanTransactions.end())
         it = mapOrphanTransactions.begin();
     return it->second.tx;
+}
+
+static CTransactionRef RandomOrphan()
+{
+    return OrphanByIndex(InsecureRand256());
+}
+
+/** This function runs CPubkey::Verify with parameters that result in all
+ * branches of the function ecdsa_signature_parse_der_lax to run. Namely, the
+ * signature literal in vch_sig_str in the following function is comprised of R
+ * and S values which both contain leading zeroes, forcing some branches of said
+ * function to run which would otherwise not. This function is called at the end
+ * of the DoS_mapOrphans test to force deterministic coverage.
+ */
+static void ForceCoverageInPubKeyVerify()
+{
+    std::string coverage_pubkey_str("\x03\x1c\xef\xd3\xfa\x1e\x91\xd2\x24\x7e\x9d\x74\xa1\xf4\x31\x27\x6e\xe4\x74"
+        "\x5b\xaf\x73\x1d\xb0\x0c\x07\xa0\x78\x81\xa5\xca\x4c\xc9", 33);
+    CPubKey coverage_pubkey(coverage_pubkey_str.begin(), coverage_pubkey_str.end());
+    std::string vch_sig_str("\x30\x44\x02\x20\x00\xa8\x9f\x92\xf4\x47\x6e\x3f\x0b\x1f\x58\x9f\x6b\x3b\xb9\xae\xc0"
+        "\x99\x84\x82\x22\x40\x68\xf5\x12\xf7\x43\xbe\xa7\x54\x87\x7c\x02\x20\x00\xa1\x09\x98\x60\x32\x32\x71\x34"
+        "\xad\xf6\x6a\x9c\x2f\xd9\xd4\xf3\xcc\xf4\xc8\x4c\x38\xbb\xd0\xac\xde\xa7\x3d\x66\x28\xa0\xe0", 70);
+    uint256 hash;
+    hash.SetHex(std::string("6af516422fef8a745aff6acdcc84076c77fb2ecd72bd5711df301230ac58fdd5"));
+
+    coverage_pubkey.Verify(hash, std::vector<unsigned char>(vch_sig_str.begin(), vch_sig_str.end()));
 }
 
 BOOST_AUTO_TEST_CASE(DoS_mapOrphans)
@@ -391,7 +419,14 @@ BOOST_AUTO_TEST_CASE(DoS_mapOrphans)
     // ... and 50 that depend on other orphans:
     for (int i = 0; i < 50; i++)
     {
-        CTransactionRef txPrev = RandomOrphan();
+        CTransactionRef txPrev;
+        if (i == 0) {
+            // This block makes sure that the condition "if (it == mapOrphanTransactions.end())" in OrphanByIndex() gets called at least once.
+            // Otherwise test coverage is non-deterministic.
+            txPrev = OrphanByIndex(ArithToUint256(arith_uint256(std::numeric_limits<uint64_t>::max())));
+        } else {
+            txPrev = RandomOrphan();
+        }
 
         CMutableTransaction tx;
         tx.vin.resize(1);
@@ -445,6 +480,8 @@ BOOST_AUTO_TEST_CASE(DoS_mapOrphans)
     BOOST_CHECK(mapOrphanTransactions.size() <= 10);
     LimitOrphanTxSize(0);
     BOOST_CHECK(mapOrphanTransactions.empty());
+
+    ForceCoverageInPubKeyVerify();
 }
 
 BOOST_AUTO_TEST_SUITE_END()
