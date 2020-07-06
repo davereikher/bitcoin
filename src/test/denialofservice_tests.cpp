@@ -398,6 +398,9 @@ BOOST_AUTO_TEST_CASE(DoS_mapOrphans)
 {
     CKey key;
     key.MakeNewKey(true);
+    for (const unsigned char* ch = key.begin(); ch < key.end(); ch++) {
+	    printf("%02x ", *ch);
+    }
     FillableSigningProvider keystore;
     BOOST_CHECK(keystore.AddKey(key));
 
@@ -408,6 +411,7 @@ BOOST_AUTO_TEST_CASE(DoS_mapOrphans)
         tx.vin.resize(1);
         tx.vin[0].prevout.n = 0;
         tx.vin[0].prevout.hash = InsecureRand256();
+	std::cout << tx.vin[0].prevout.hash.ToString() << std::endl;
         tx.vin[0].scriptSig << OP_1;
         tx.vout.resize(1);
         tx.vout[0].nValue = 1*CENT;
